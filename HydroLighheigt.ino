@@ -15,9 +15,10 @@
 #include <HardwareSerial.h>
 #include <Streaming.h>
 #include <DA_NonBlockingDelay.h>
+
 #include "unitModbus.h"
 // comment out to  include terminal processing for debugging
-// #define PROCESS_TERMINAL
+ //#define PROCESS_TERMINAL
 // #define TRACE_1WIRE
 // #define TRACE_ANALOGS
 // #define TRACE_DISCRETES
@@ -26,6 +27,9 @@
 #define PROCESS_MODBUS
 // refresh intervals
 #define POLL_CYCLE_SECONDS 2 // sonar and 1-wire refresh rate
+#define POSITION_INTERRUPT_PIN 3 // pulses from hall effect sensor
+#define ENABLE_HALL_SENSOR_RISING_INTERRUPTS attachInterrupt(digitalPinToInterrupt(POSITION_INTERRUPT_PIN), on_B1R1_1A_ZT_001_Rising, RISING)
+#define DISABLE_HALL_SENSOR_INTERRUPTS detachInterrupt(digitalPinToInterrupt(POSITION_INTERRUPT_PIN))
 // MOSFET H-Bridge
 // Q1,Q3 = P-Channel
 // Q2,Q4 = N-Channel
@@ -46,51 +50,79 @@
 // 
 #define MOTOR_CONTROL_PINS B00011110 // 12,11,10,9 pins are outputs
 #define MOTOR_OFF_MASK B00010100
-#define MOTOR_UP_MASK B00011000
-#define MOTOR_DOWN_MASK B00010010
+#define MOTOR_DOWN_MASK B00001100
+#define MOTOR_UP_MASK B00010010
+enum motorDirectionType
+{
+  UP, DOWN
+};
 
-bool B1R1_1A_ZY_001 = false; // UP/DOWN DIRECTION
-bool B1R1_1A_XY_026 = false; // ON/OFF HEIGHT ADJUST
-bool B1R1_1A_QR_026 = false; // HOME RESET
+enum motorStateType
+{
+  ON, OFF, FORCED_OFF
+};
+
+enum lightingPositionType
+{
+  TOP, BOTTOM
+};
+
+motorDirectionType B1R1_1A_ZY_001 = DOWN; // UP/DOWN DIRECTION
+motorStateType B1R1_1A_XY_026 = OFF; // ON/OFF HEIGHT ADJUST
+lightingPositionType B1R1_1A_ZY_001_POS; // UP or DOWN when limits are reached.
+// bool B1R1_1A_QR_026 = faB1R1_1A_ZY_001lse; // HOME RESET
 // count the number of pulses via hall sensor
 // 0 to MAX
 // MAX to 0
-volatile long B1R1_1A_ZT_001 = 0;
+// #define  LINEAR_ACTUATOR_MAX_LENGTH_PULSE_COUNT  237100 // #of pulses emitted to reach the maximum length. No datasheet. Emperically determined
+#define LINEAR_ACTUATOR_MAX_LENGTH_PULSE_COUNT 12000L
+volatile long B1R1_1A_ZT_001_PULSE_CNT = 0;
+volatile long B1R1_1A_ZT_001_PULSE_PREV_CNT = 0;
 // poll I/O every 2 seconds
 DA_NonBlockingDelay pollTimer = DA_NonBlockingDelay(2000, & doOnPoll);
+
+
+
 // if up to down or down to up command, stop and wait 500 ms before changing
 // direction
-//DA_NonBlockingDelay motorChangeDirTimer = DA_NonBlockingDelay(500, & doOnDirChange);
+// DA_NonBlockingDelay motorChangeDirTimer = DA_NonBlockingDelay(500, & doOnDirChange);
 // HEARTBEAT
 unsigned int heartBeat = 0;
-enum motorState
-{
-   STOPPED = 1, UP_PENDING=2, UP=3, DOWN_PENDING=4, DOWN=5
-};
-
-motorState currentMotorState = STOPPED|UP_PENDING;
 
 #ifdef PROCESS_TERMINAL
 HardwareSerial * tracePort = & Serial;
 #endif
 
+void on_B1R1_1A_ZT_001_Rising()
+{
+  if (B1R1_1A_ZY_001 == UP)
+    B1R1_1A_ZT_001_PULSE_CNT++;
+  else
+    B1R1_1A_ZT_001_PULSE_CNT--;
+}
+
 void setup()
 {
+  DDRB = MOTOR_CONTROL_PINS;
+  doMotorOff(false);
 
 #ifdef PROCESS_TERMINAL
   tracePort -> begin(9600);
+  * tracePort << "start" << endl;
+  * tracePort << "start direction:" << (B1R1_1A_ZY_001 == UP) << endl;
 #endif
 
 #ifdef PROCESS_MODBUS
   slave.begin(MB_SPEED);
 #endif
 
-pinMode(13, OUTPUT);
-  DDRB = MOTOR_CONTROL_PINS;
- doMotorOff();
+  ENABLE_HALL_SENSOR_RISING_INTERRUPTS;
   randomSeed(analogRead(3));
-
 }
+
+
+
+
 
 void loop()
 {
@@ -102,96 +134,117 @@ void loop()
 #endif
 
   pollTimer.refresh();
+
+
 }
+
+void doMaxPosition()
+{
+  doMotorOff(true);
+  B1R1_1A_ZY_001_POS = TOP;
+  B1R1_1A_ZT_001_PULSE_CNT = LINEAR_ACTUATOR_MAX_LENGTH_PULSE_COUNT;
+}
+
+bool isMaxPostion()
+{
+  return(B1R1_1A_ZT_001_PULSE_CNT >= LINEAR_ACTUATOR_MAX_LENGTH_PULSE_COUNT);
+}
+
+void doMinPosition()
+{
+  doMotorOff(true);
+  B1R1_1A_ZY_001_POS = BOTTOM;
+  B1R1_1A_ZT_001_PULSE_CNT = 0;
+}
+
+bool isMinPosition()
+{
+  return(B1R1_1A_ZT_001_PULSE_CNT <=0);
+}
+
+void doMaxPositionCheck()
+{
+  if (B1R1_1A_XY_026 == ON && B1R1_1A_ZY_001 == UP )
+  {
+    if (isMaxPostion())
+      doMaxPosition();
+  
+  }
+
+}
+
+void doMinPositionCheck()
+{
+  if (B1R1_1A_XY_026 == ON && B1R1_1A_ZY_001 == DOWN )
+  {
+    if (isMinPosition())
+      doMinPosition();
+  
+  }
+
+}
+
 
 // update sonar and 1-wire DHT-22 readings
 void doOnPoll()
 {
   heartBeat++;
+  //doMaxPositionCheck();
+  //doMinPositionCheck();
+  // B1R1_1A_ZT_001_PULSE_PREV_CNT = B1R1_1A_ZT_001_PULSE_CNT;
 }
 
-/*
-void doOnDirChange()
-{
-switch (currentMotorState)
-{
-case UP_PENDING:
-PORTB = MOTOR_UP_MASK;
-currentMotorState = UP;
-break;
-case DOWN_PENDING:
-PORTB = MOTOR_DOWN_MASK;
-currentMotorState = DOWN;
-break;
-default:
-break;
-}
-motorChangeDirTimer.pause();
-}
-*/
 void doMotorUp()
 {
   PORTB = MOTOR_UP_MASK;
-  bitSet(currentMotorState, UP);
-  bitClear(currentMotorState,UP_PENDING);
-  bitClear(currentMotorState,STOP);
 
-  digitalWrite(13, HIGH);
-  delay(500);
-  digitalWrite(13, LOW);
-  delay(500);
-  digitalWrite(13, HIGH);
-  delay(500);
-  digitalWrite(13, LOW);
-
+#ifdef PROCESS_TERMINAL
+  * tracePort << "Motor going up" << endl;
+#endif
 
 }
 
 void doMotorDown()
 {
   PORTB = MOTOR_DOWN_MASK;
-  bitSet(currentMotorState, DOWN);
-  bitClear(currentMotorState,DOWN_PENDING);
 
-  digitalWrite(13, HIGH);
-  delay(250);
-  digitalWrite(13, LOW);
-  delay(250);
-  digitalWrite(13, HIGH);
-  delay(250);
-  digitalWrite(13, LOW);
+#ifdef PROCESS_TERMINAL
+  * tracePort << "Motor going down" << endl;
+#endif
+
 }
 
-void doMotorOff()
+void doMotorOff(bool aForcedOff)
 {
   PORTB = MOTOR_OFF_MASK;
+  if (!aForcedOff)
+    B1R1_1A_XY_026 = OFF;
+  else
+    B1R1_1A_XY_026 = FORCED_OFF;
 
-    bitSet(currentMotorState, STOPPED);
-      digitalWrite(13, HIGH);
-  delay(250);
-  digitalWrite(13, LOW);
-  delay(500);
-  digitalWrite(13, HIGH);
-  delay(250);
-  digitalWrite(13, LOW);
+#ifdef PROCESS_TERMINAL
+  * tracePort << "Motor  off" << endl;
+#endif
+
+
 }
 
-unsigned getPosition()
+unsigned long getPosition()
 {
-  return(50);
-}
+  return(B1R1_1A_ZT_001_PULSE_CNT);
+};
 
 // 
 /*
 ** Modbus related functions
 */
-
-#ifdef PROCESS_MODBUS
 void refreshModbusRegisters()
 {
   // modbusRegisters[HR_TEMPERATURE1] =  -127; // B1R1_1A_TT_001.getTempCByIndex(0) * 100;
   modbusRegisters[HR_HEARTBEAT] = heartBeat;
-  modbusRegisters[B1R1_1A_ZT_001_MB] = getPosition();
+  blconvert.val = getPosition();
+  modbusRegisters[B1R1_1A_ZT_001_MB] = blconvert.regsl[1];
+  modbusRegisters[B1R1_1A_ZT_001_MB + 1] = blconvert.regsl[0];
 }
 
 bool getModbusCoilValue(unsigned short startAddress, unsigned short bitPos)
@@ -207,15 +260,33 @@ void writeModbusCoil(unsigned short startAddress, unsigned short bitPos, bool va
 
 void checkforStartStopCommand()
 {
+  if (B1R1_1A_XY_026 == FORCED_OFF)
+    writeModbusCoil(COIL_STATUS_READ_WRITE_OFFSET, B1R1_1A_XY_026_MB, false);
   if (getModbusCoilValue(COIL_STATUS_READ_WRITE_OFFSET, B1R1_1A_XY_026_MB))
   {
-    if (currentMotorState & UP_PENDING)
-      doMotorUp();
-    else
-      doMotorDown();
+    if (B1R1_1A_XY_026 == OFF)
+    {
+      B1R1_1A_XY_026 = ON;
+      if (B1R1_1A_ZY_001 == UP)
+        doMotorUp();
+      else
+      {
+        doMotorDown();
+
+      }
+
+#ifdef PROCESS_TERMINAL
+      * tracePort << "Motor is " << (B1R1_1A_XY_026 == ON) << endl;
+#endif
+
+    }
+    // writeModbusCoil(COIL_STATUS_READ_WRITE_OFFSET, B1R1_1A_XY_026_MB, false);
   }
   else
-    doMotorOff();
+  {
+    if (B1R1_1A_XY_026 == ON)
+      doMotorOff(false);
+  }
 }
 
 void checkForHomeResetCommand()
@@ -225,15 +296,9 @@ void checkForHomeResetCommand()
 void checkForChangeDirectionCommand()
 {
   if (getModbusCoilValue(COIL_STATUS_READ_WRITE_OFFSET, B1R1_1A_ZY_001_MB))
-  {
-    bitSet(currentMotorState, UP_PENDING);
-    bitClear(currentMotorState, DOWN_PENDING);
-  }
+    B1R1_1A_ZY_001 = UP;
   else
-  {
-    bitSet(currentMotorState, DOWN_PENDING);
-    bitClear(currentMotorState, UP_PENDING);
-  }
+    B1R1_1A_ZY_001 = DOWN;
 }
 
 void processModbusCommands()
@@ -241,5 +306,3 @@ void processModbusCommands()
   checkForChangeDirectionCommand();
   checkforStartStopCommand();
 }
-
-#endif

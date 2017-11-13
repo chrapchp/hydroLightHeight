@@ -17,7 +17,7 @@
 
 
 // specific read holding registers to unit
-#define B1R1_1A_ZT_001_MB CUSTOM_HR_START_READ
+#define B1R1_1A_ZT_001_MB HR_HEARTBEAT + 1
 
 // specific write holding registers to unit
 #define FUTURES CUSTOM_HR_START_WRITE
@@ -26,8 +26,8 @@
 
 
 
-#define B1R1_1A_ZY_001_MB 	84 
-#define B1R1_1A_XY_026_MB	B1R1_1A_ZY_001_MB + 1
+#define B1R1_1A_ZY_005_MB 	84 
+#define B1R1_1A_XY_026_MB	B1R1_1A_ZY_005_MB + 1
 #define B1R1_1A_QR_026_MB	B1R1_1A_XY_026_MB + 1
 
 

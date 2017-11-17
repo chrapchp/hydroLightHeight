@@ -53,8 +53,8 @@
 // 
 #define MOTOR_CONTROL_PINS B00011110 // 12,11,10,9 pins are outputs
 #define MOTOR_OFF_MASK B00010100
-#define MOTOR_DOWN_MASK B00001100
-#define MOTOR_UP_MASK B00010010
+#define MOTOR_REVERSE_MASK B00001100
+#define MOTOR_FOWARD_MASK B00010010
 enum motorDirectionType
 {
   UP, DOWN
@@ -92,6 +92,8 @@ DA_NonBlockingDelay pollTimer = DA_NonBlockingDelay(2000, & doOnPoll);
 // HEARTBEAT
 unsigned int heartBeat = 0;
 
+bool B1R1_1A_QR_026 = false;
+
 #ifdef PROCESS_TERMINAL
 HardwareSerial * tracePort = & Serial;
 #endif
@@ -100,7 +102,7 @@ void on_B1R1_1A_ZT_001_Rising()
 {
   if(B1R1_1A_XY_026 == ON )
   {
-  if (B1R1_1A_ZY_005 == UP)
+  if (B1R1_1A_ZY_005 == DOWN)
     B1R1_1A_ZT_001_PULSE_Count++;
   else
   {
@@ -144,61 +146,61 @@ void loop()
   pollTimer.refresh();
 }
 
-void doMaxPosition()
+void doFullyExtendedPosition()
 {
   doMotorOff(true);
   #ifdef PROCESS_TERMINAL
   *tracePort << "maxPosition Reached" << endl;
   #endif
-  B1R1_1A_ZY_005_POS = TOP;
+  B1R1_1A_ZY_005_POS = BOTTOM;
   B1R1_1A_ZT_001_PULSE_Max = B1R1_1A_ZT_001_PULSE_Count;
 
   //B1R1_1A_ZT_001_PULSE_Count = LINEAR_ACTUATOR_MAX_LENGTH_PULSE_COUNT;
 }
 
-bool isMaxPostion()
+bool isFullyExtended()
 {
   return(B1R1_1A_ZT_001_PULSE_Count >= LINEAR_ACTUATOR_MAX_LENGTH_PULSE_COUNT);
 }
 
-void doMinPosition()
+void doFullyRetractedPosition()
 {
   doMotorOff(true);
   #ifdef PROCESS_TERMINAL
   *tracePort << "minimum Reached" << endl;
   #endif
-  B1R1_1A_ZY_005_POS = BOTTOM;
+  B1R1_1A_ZY_005_POS = TOP;
   B1R1_1A_ZT_001_PULSE_Count = 0;
   B1R1_1A_ZT_001_PULSE_Max = LINEAR_ACTUATOR_MAX_LENGTH_PULSE_COUNT;
 }
 
-bool isMinPosition()
+bool isFullyRetracted()
 {
 
-  return(minPositionWatchDog >= WATCH_DOG_COUNT_ELAPSED ||B1R1_1A_ZT_001_PULSE_Count <=0);
+  return(minPositionWatchDog >= WATCH_DOG_COUNT_ELAPSED || (B1R1_1A_ZT_001_PULSE_Count <=0 && !B1R1_1A_QR_026)) ;
 }
 
-void doMaxPositionCheck()
+void doFullyExtendedPositionCheck()
 {
-  if (B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == UP)
+  if (B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == DOWN)
   {
     #ifdef PROCESS_TERMINAL
     *tracePort << "checking if at the top" << endl;
     #endif
-    if (isMaxPostion())
-      doMaxPosition();
+    if (isFullyExtended())
+      doFullyExtendedPosition();
   }
 }
 
-void doMinPositionCheck()
+void doFullyRetractedPositionCheck()
 {
-  if (B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == DOWN)
+  if (B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == UP)
   {
         #ifdef PROCESS_TERMINAL
     *tracePort << "checking if at the bottom" << endl;
     #endif
-    if (isMinPosition())
-      doMinPosition();
+    if (isFullyRetracted())
+      doFullyRetractedPosition();
   }
 }
 
@@ -207,15 +209,15 @@ void doOnPoll()
 {
   heartBeat++;
 
-  doMaxPositionCheck();
-  doMinPositionCheck();
-    if(B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == DOWN )
+  doFullyExtendedPositionCheck(); // fully extended (lamps are at their lowest)
+  doFullyRetractedPositionCheck(); // fulll retracted (lamps are at their highest)
+    if(B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == UP )
     minPositionWatchDog++;
 }
 
-void doMotorUp()
+void doMotorForward()
 {
-  PORTB = MOTOR_UP_MASK;
+  PORTB = MOTOR_FOWARD_MASK;
 
 #ifdef PROCESS_TERMINAL
   * tracePort << "Motor going up" << endl;
@@ -223,9 +225,9 @@ void doMotorUp()
 
 }
 
-void doMotorDown()
+void doMotorReverse()
 {
-  PORTB = MOTOR_DOWN_MASK;
+  PORTB = MOTOR_REVERSE_MASK;
 
 #ifdef PROCESS_TERMINAL
   * tracePort << "Motor going down" << endl;
@@ -260,11 +262,11 @@ void refreshModbusRegisters()
 {
   // modbusRegisters[HR_TEMPERATURE1] =  -127; // B1R1_1A_TT_001.getTempCByIndex(0) * 100;
   modbusRegisters[HR_HEARTBEAT] = heartBeat;
-  //odbusRegisters[B1R1_1A_ZT_001_MB] = (unsigned int ) getPosition()*10;
+  modbusRegisters[B1R1_1A_ZT_001_MB] =(unsigned int ) getPosition()*10;
   
 
   
-  modbusRegisters[B1R1_1A_ZT_001_MB  ] = (unsigned int)  ( getPosition()/B1R1_1A_ZT_001_PULSE_Max * 100);
+  //modbusRegisters[B1R1_1A_ZT_001_MB  ] = (unsigned int)  ( getPosition()/B1R1_1A_ZT_001_PULSE_Max * 100);
     blconvert.val = getPosition();
   modbusRegisters[B1R1_1A_ZT_001_MB + 1] = blconvert.regsl[1];
   modbusRegisters[B1R1_1A_ZT_001_MB + 2] = blconvert.regsl[0];
@@ -294,10 +296,10 @@ void checkforStartStopCommand()
     {
       B1R1_1A_XY_026 = ON;
       if (B1R1_1A_ZY_005 == UP)
-        doMotorUp();
+        doMotorReverse();
       else
       {
-        doMotorDown();
+        doMotorForward();
       }
 
 #ifdef PROCESS_TERMINAL
@@ -316,6 +318,7 @@ void checkforStartStopCommand()
 
 void checkForHomeResetCommand()
 {
+  B1R1_1A_QR_026 = getModbusCoilValue(COIL_STATUS_READ_WRITE_OFFSET, B1R1_1A_QR_026_MB);
 }
 
 void checkForChangeDirectionCommand()
@@ -332,6 +335,7 @@ void checkForChangeDirectionCommand()
 
 void processModbusCommands()
 {
+  checkForHomeResetCommand();
   checkForChangeDirectionCommand();
   checkforStartStopCommand();
 }

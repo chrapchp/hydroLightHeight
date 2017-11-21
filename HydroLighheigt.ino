@@ -209,10 +209,11 @@ void doOnPoll()
 {
   heartBeat++;
 
-  doFullyExtendedPositionCheck(); // fully extended (lamps are at their lowest)
-  doFullyRetractedPositionCheck(); // fulll retracted (lamps are at their highest)
-    if(B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == UP )
-    minPositionWatchDog++;
+
+  //doFullyExtendedPositionCheck(); // fully extended (lamps are at their lowest)
+  //doFullyRetractedPositionCheck(); // fulll retracted (lamps are at their highest)
+  //  if(B1R1_1A_XY_026 == ON && B1R1_1A_ZY_005 == UP )
+  //  minPositionWatchDog++;
 }
 
 void doMotorForward()
